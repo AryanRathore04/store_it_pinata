@@ -1,7 +1,7 @@
 "use server";
 
-import { createAdminClient, createSessionClient } from "../appwrite"; // Corrected import path
-import { InputFile } from "node-appwrite/file";
+import axios from 'axios';
+import { createAdminClient } from "../appwrite"; // Corrected import path
 import { appwriteConfig } from "../appwrite/config"; // Corrected import path
 import { ID, Models, Query } from "node-appwrite";
 import { constructFileUrl, getFileType, parseStringify } from "../utils"; // Corrected import path
@@ -9,25 +9,25 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "../actions/user.actions"; // Corrected import path
 
 // Function to upload file to IPFS using Pinata
-export const uploadFileToIPFS = async (file: File) => {
+export const uploadFileToIPFS = async (file: File): Promise<string> => {
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append('file', file); // Append the file to the form data
 
-  const response = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
-    method: "POST",
-    headers: {
-      pinata_api_key: process.env.PINATA_API_KEY!,
-      pinata_secret_api_key: process.env.PINATA_SECRET_API_KEY!,
-    },
-    body: formData,
-  });
+  try {
+      const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+          maxContentLength: Infinity,
+          headers: {
+              'Content-Type': `multipart/form-data`, // No need for boundary
+              pinata_api_key: process.env.PINATA_API_KEY, // Use environment variable
+              pinata_secret_api_key: process.env.PINATA_SECRET_API_KEY, // Use environment variable
+          },
+      });
 
-  if (!response.ok) {
-    throw new Error("Failed to upload file to IPFS");
+      return response.data.IpfsHash; // Return the IPFS CID
+  } catch (error) {
+      console.error('Error uploading to IPFS:', error);
+      throw new Error('Failed to upload file to IPFS');
   }
-
-  const data = await response.json();
-  return data.IpfsHash; // Return the IPFS CID
 };
 
 // Existing uploadFile function
@@ -36,12 +36,7 @@ const handleError = (error: unknown, message: string) => {
   throw error;
 };
 
-export const uploadFile = async ({
-  file,
-  ownerId,
-  accountId,
-  path,
-}: UploadFileProps) => {
+export const uploadFile = async (file: File, ownerId: string, accountId: string, path: string) => {
   const { storage, databases } = await createAdminClient();
 
   try {
@@ -50,7 +45,7 @@ export const uploadFile = async ({
     const bucketFile = await storage.createFile(
       appwriteConfig.bucketId,
       ID.unique(),
-      InputFile.fromBuffer(file, file.name),
+      file, // Directly use the File
     );
 
     const fileDocument = {
@@ -85,6 +80,7 @@ export const uploadFile = async ({
   }
 };
 
+// Ensure all other functions are exported correctly
 export const getFiles = async (ownerId: string, types: string[], searchText: string, sort: string) => {
   const { databases } = await createAdminClient();
   const response = await databases.listDocuments(

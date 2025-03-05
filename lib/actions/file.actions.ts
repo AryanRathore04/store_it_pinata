@@ -1,77 +1,71 @@
 "use server";
 
-import axios from 'axios';
-import { createAdminClient } from "../appwrite"; // Corrected import path
-import { appwriteConfig } from "../appwrite/config"; // Corrected import path
+import axios from "axios";
+import { createAdminClient } from "../appwrite";
+import { appwriteConfig } from "../appwrite/config";
 import { ID, Models, Query } from "node-appwrite";
-import { constructFileUrl, getFileType, parseStringify } from "../utils"; // Corrected import path
+import { parseStringify, getFileType } from "../utils";
 import { revalidatePath } from "next/cache";
-import { getCurrentUser } from "../actions/user.actions"; // Corrected import path
+import { getCurrentUser } from "../actions/user.actions";
 
-// Function to upload file to IPFS using Pinata
-export const uploadFileToIPFS = async (file: File): Promise<string> => {
-  const formData = new FormData();
-  formData.append('file', file); // Append the file to the form data
+const PINATA_API_KEY = process.env.PINATA_API_KEY;
+const PINATA_SECRET_API_KEY = process.env.PINATA_SECRET_API_KEY;
+const PINATA_JWT = process.env.NEXT_PUBLIC_PINATA_JWT;
+const PINATA_BASE_URL = "https://api.pinata.cloud/pinning/pinFileToIPFS";
+const PINATA_UNPIN_URL = "https://api.pinata.cloud/pinning/unpin/";
 
-  try {
-      const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
-          maxContentLength: Infinity,
-          headers: {
-              'Content-Type': `multipart/form-data`, // No need for boundary
-              pinata_api_key: process.env.PINATA_API_KEY, // Use environment variable
-              pinata_secret_api_key: process.env.PINATA_SECRET_API_KEY, // Use environment variable
-          },
-      });
-
-      return response.data.IpfsHash; // Return the IPFS CID
-  } catch (error) {
-      console.error('Error uploading to IPFS:', error);
-      throw new Error('Failed to upload file to IPFS');
-  }
-};
-
-// Existing uploadFile function
 const handleError = (error: unknown, message: string) => {
-  console.log(error, message);
+  console.error(message, error);
   throw error;
 };
 
-export const uploadFile = async (file: File, ownerId: string, accountId: string, path: string) => {
-  const { storage, databases } = await createAdminClient();
+// Upload file to IPFS and store metadata in Appwrite
+export const uploadFile = async (file: File, accountId: string, path: string) => {
+  const { databases } = await createAdminClient();
+  const currentUser = await getCurrentUser();
+  if (!currentUser) throw new Error("User not found");
 
   try {
-    const ipfsCID = await uploadFileToIPFS(file); // Call the new IPFS upload function
+    // Upload file to IPFS (Pinata)
+    const formData = new FormData();
+    formData.append("file", file);
 
-    const bucketFile = await storage.createFile(
-      appwriteConfig.bucketId,
-      ID.unique(),
-      file, // Directly use the File
-    );
+    const response = await axios.post(PINATA_BASE_URL, formData, {
+      headers: {
+        Authorization: `Bearer ${PINATA_JWT}`,
+        "Content-Type": "multipart/form-data",
+      },
+    });
 
+    if (response.status !== 200) {
+      throw new Error("Failed to upload file to IPFS");
+    }
+
+    const ipfsHash = response.data.IpfsHash;
+    const fileUrl = `https://gateway.pinata.cloud/ipfs/${ipfsHash}`;
+
+    // Extract file type and extension
+    const { type, extension } = getFileType(file.name);
+
+    // Store file metadata in Appwrite Database; note bucketFileId stores the IPFS hash.
     const fileDocument = {
-      type: getFileType(bucketFile.name).type,
-      name: bucketFile.name,
-      url: constructFileUrl(bucketFile.$id),
-      extension: getFileType(bucketFile.name).extension,
-      size: bucketFile.sizeOriginal,
-      owner: ownerId,
+      type, // Required attribute
+      extension,
+      name: file.name,
+      url: fileUrl,
+      size: file.size,
+      owner: currentUser.$id,
       accountId,
       users: [],
-      bucketFileId: bucketFile.$id,
-      ipfsCID, // Include the IPFS CID in the document
+      bucketFileId: ipfsHash, // Using ipfsHash as the bucketFileId
     };
 
-    const newFile = await databases
-      .createDocument(
-        appwriteConfig.databaseId,
-        appwriteConfig.filesCollectionId,
-        ID.unique(),
-        fileDocument,
-      )
-      .catch(async (error: unknown) => {
-        await storage.deleteFile(appwriteConfig.bucketId, bucketFile.$id);
-        handleError(error, "Failed to create file document");
-      });
+    const newFile = await databases.createDocument(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      ID.unique(),
+      fileDocument
+    );
 
     revalidatePath(path);
     return parseStringify(newFile);
@@ -80,58 +74,115 @@ export const uploadFile = async (file: File, ownerId: string, accountId: string,
   }
 };
 
-// Ensure all other functions are exported correctly
-export const getFiles = async (ownerId: string, types: string[], searchText: string, sort: string) => {
+
+
+// Fetch all files stored on IPFS
+export const getFiles = async (types: string[], searchText: string, sort: string) => {
   const { databases } = await createAdminClient();
-  const response = await databases.listDocuments(
-    appwriteConfig.databaseId,
-    appwriteConfig.filesCollectionId,
-    [Query.equal("ownerId", ownerId)]
-  );
-  return {
-    total: response.total,
-    documents: response.documents,
-  };
+  const currentUser = await getCurrentUser();
+  if (!currentUser) throw new Error("User not found");
+
+  try {
+    const queries = [
+      Query.equal("owner", currentUser.$id),
+      Query.orderDesc("$createdAt"),
+    ];
+
+    const files = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      queries
+    );
+
+    return parseStringify(files);
+  } catch (error) {
+    handleError(error, "Failed to get files");
+  }
 };
 
-export const getTotalSpaceUsed = async (ownerId: string) => {
-  const files = await getFiles(ownerId, [], "", ""); // Call with appropriate arguments
-  return files.documents.reduce((total, file) => total + file.size, 0);
+// Get total space used by current user (in bytes)
+export const getTotalSpaceUsed = async () => {
+  const { databases } = await createAdminClient();
+  const currentUser = await getCurrentUser();
+  if (!currentUser) throw new Error("User not found");
+
+  try {
+    const queries = [Query.equal("owner", currentUser.$id)];
+    const files = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      queries
+    );
+    // Sum the file sizes from each document
+    const totalBytes = files.documents.reduce(
+      (total: number, doc: any) => total + (doc.size || 0),
+      0
+    );
+    return totalBytes;
+  } catch (error) {
+    handleError(error, "Failed to get total space used");
+  }
 };
 
-export const deleteFile = async (fileId: string) => {
-  const { storage } = await createAdminClient();
-  await storage.deleteFile(appwriteConfig.bucketId, fileId);
+// Delete file from IPFS and Appwrite Database
+export const deleteFile = async (fileId: string, ipfsHash: string) => {
+  const { databases } = await createAdminClient();
+
+  try {
+    // Remove file from Pinata IPFS
+    await axios.delete(`${PINATA_UNPIN_URL}${ipfsHash}`, {
+      headers: { Authorization: `Bearer ${PINATA_JWT}` },
+    });
+
+    // Remove file record from Appwrite Database
+    await databases.deleteDocument(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      fileId
+    );
+  } catch (error) {
+    handleError(error, "Failed to delete file");
+  }
 };
 
+// Rename file in Appwrite Database
 export const renameFile = async (fileId: string, newName: string) => {
   const { databases } = await createAdminClient();
-  const fileDocument = await databases.getDocument(
-    appwriteConfig.databaseId,
-    appwriteConfig.filesCollectionId,
-    fileId
-  );
-  fileDocument.name = newName;
-  await databases.updateDocument(
-    appwriteConfig.databaseId,
-    appwriteConfig.filesCollectionId,
-    fileId,
-    fileDocument
-  );
+
+  try {
+    await databases.updateDocument(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      fileId,
+      { name: newName }
+    );
+  } catch (error) {
+    handleError(error, "Failed to rename file");
+  }
 };
 
+
+// Update file users in Appwrite Database
 export const updateFileUsers = async (fileId: string, users: string[]) => {
   const { databases } = await createAdminClient();
-  const fileDocument = await databases.getDocument(
-    appwriteConfig.databaseId,
-    appwriteConfig.filesCollectionId,
-    fileId
-  );
-  fileDocument.users = users;
-  await databases.updateDocument(
-    appwriteConfig.databaseId,
-    appwriteConfig.filesCollectionId,
-    fileId,
-    fileDocument
-  );
-}
+  try {
+    // Retrieve current file document
+    const fileDocument = await databases.getDocument(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      fileId
+    );
+    // Update the users field
+    const updatedDocument = { ...fileDocument, users };
+    // Save changes to the document
+    await databases.updateDocument(
+      appwriteConfig.databaseId,
+      appwriteConfig.filesCollectionId,
+      fileId,
+      updatedDocument
+    );
+  } catch (error) {
+    console.error("Failed to update file users", error);
+    throw error;
+  }
+};

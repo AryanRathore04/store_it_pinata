@@ -20,7 +20,6 @@ import Image from "next/image";
 import { Models } from "node-appwrite";
 import { actionsDropdownItems } from "../constants";
 import Link from "next/link";
-import { constructDownloadUrl } from "../lib/utils";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import {
@@ -49,7 +48,7 @@ const ActionDropdown = ({ file }: { file: Models.Document }) => {
   };
 
   const handleAction = async () => {
-    if (!action) return false; // Ensure a boolean is returned
+    if (!action) return false;
     setIsLoading(true);
     let success = false;
 
@@ -63,67 +62,52 @@ const ActionDropdown = ({ file }: { file: Models.Document }) => {
         return true;
       },
       delete: async () => {
-        await deleteFile(file.$id);
+        // 🔹 Update to delete from IPFS
+        await deleteFile(file.$id, file.ipfsHash);
         return true;
       },
     };
 
     success = await actions[action.value as keyof typeof actions]();
     if (success) {
-      closeAllModals(); // Ensure success is a boolean
+      closeAllModals();
     }
 
     setIsLoading(false);
-    return success; // Ensure a boolean is returned
+    return success;
   };
 
   const handleRemoveUser = async (email: string) => {
     const updatedEmails = emails.filter((e) => e !== email);
-
-    await updateFileUsers(file.$id, updatedEmails); // Corrected to pass fileId and updated emails
-
+    await updateFileUsers(file.$id, updatedEmails);
     setEmails(updatedEmails);
     closeAllModals();
   };
 
   const renderDialogContent = () => {
     if (!action) return null;
-
     const { value, label } = action;
 
     return (
       <DialogContent className="shad-dialog button">
         <DialogHeader className="flex flex-col gap-3">
-          <DialogTitle className="text-center text-light-100">
-            {label}
-          </DialogTitle>
+          <DialogTitle className="text-center text-light-100">{label}</DialogTitle>
           {value === "rename" && (
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <Input type="text" value={name} onChange={(e) => setName(e.target.value)} />
           )}
           {value === "details" && <FileDetails file={file} />}
           {value === "share" && (
-            <ShareInput
-              file={file}
-              onInputChange={setEmails}
-              onRemove={handleRemoveUser}
-            />
+            <ShareInput file={file} onInputChange={setEmails} onRemove={handleRemoveUser} />
           )}
           {value === "delete" && (
             <p className="delete-confirmation">
-              Are you sure you want to delete{` `}
-              <span className="delete-file-name">{file.name}</span>?
+              Are you sure you want to delete <span className="delete-file-name">{file.name}</span>?
             </p>
           )}
         </DialogHeader>
         {["rename", "delete", "share"].includes(value) && (
           <DialogFooter className="flex flex-col gap-3 md:flex-row">
-            <Button onClick={closeAllModals} className="modal-cancel-button">
-              Cancel
-            </Button>
+            <Button onClick={closeAllModals} className="modal-cancel-button">Cancel</Button>
             <Button onClick={handleAction} className="modal-submit-button">
               <p className="capitalize">{value}</p>
               {isLoading && (
@@ -146,17 +130,10 @@ const ActionDropdown = ({ file }: { file: Models.Document }) => {
     <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
       <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
         <DropdownMenuTrigger className="shad-no-focus">
-          <Image
-            src="/assets/icons/dots.svg"
-            alt="dots"
-            width={34}
-            height={34}
-          />
+          <Image src="/assets/icons/dots.svg" alt="dots" width={34} height={34} />
         </DropdownMenuTrigger>
         <DropdownMenuContent>
-          <DropdownMenuLabel className="max-w-[200px] truncate">
-            {file.name}
-          </DropdownMenuLabel>
+          <DropdownMenuLabel className="max-w-[200px] truncate">{file.name}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {actionsDropdownItems.map((actionItem) => (
             <DropdownMenuItem
@@ -164,38 +141,19 @@ const ActionDropdown = ({ file }: { file: Models.Document }) => {
               className="shad-dropdown-item"
               onClick={() => {
                 setAction(actionItem);
-
-                if (
-                  ["rename", "share", "delete", "details"].includes(
-                    actionItem.value
-                  )
-                ) {
+                if (["rename", "share", "delete", "details"].includes(actionItem.value)) {
                   setIsModalOpen(true);
                 }
               }}
             >
               {actionItem.value === "download" ? (
-                <Link
-                  href={constructDownloadUrl(file.bucketFileId)}
-                  download={file.name}
-                  className="flex items-center gap-2"
-                >
-                  <Image
-                    src={actionItem.icon}
-                    alt={actionItem.label}
-                    width={30}
-                    height={30}
-                  />
+                <Link href={file.url} download={file.name} className="flex items-center gap-2">
+                  <Image src={actionItem.icon} alt={actionItem.label} width={30} height={30} />
                   {actionItem.label}
                 </Link>
               ) : (
                 <div className="flex items-center gap-2">
-                  <Image
-                    src={actionItem.icon}
-                    alt={actionItem.label}
-                    width={30}
-                    height={30}
-                  />
+                  <Image src={actionItem.icon} alt={actionItem.label} width={30} height={30} />
                   {actionItem.label}
                 </div>
               )}
@@ -203,9 +161,9 @@ const ActionDropdown = ({ file }: { file: Models.Document }) => {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-
       {renderDialogContent()}
     </Dialog>
   );
 };
+
 export default ActionDropdown;

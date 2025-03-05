@@ -25,13 +25,19 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => (
 );
 
 export const FileDetails = ({ file }: { file: Models.Document }) => {
+  // Safely extract owner name:
+  const ownerName =
+    file.owner && typeof file.owner === "object" && "fullName" in file.owner
+      ? (file.owner as { fullName: string }).fullName
+      : file.owner || "Unknown";
+
   return (
     <>
       <ImageThumbnail file={file} />
       <div className="space-y-4 px-2 pt-2">
         <DetailRow label="Format:" value={file.extension} />
         <DetailRow label="Size:" value={convertFileSize(file.size)} />
-        <DetailRow label="Owner:" value={file.owner.fullName} />
+        <DetailRow label="Owner:" value={ownerName} />
         <DetailRow label="Last edit:" value={formatDateTime(file.$updatedAt)} />
       </div>
     </>
@@ -48,7 +54,6 @@ export const ShareInput = ({ file, onInputChange, onRemove }: Props) => {
   return (
     <>
       <ImageThumbnail file={file} />
-
       <div className="share-wrapper">
         <p className="subtitle-2 pl-1 text-light-100">
           Share file with other users
@@ -66,18 +71,11 @@ export const ShareInput = ({ file, onInputChange, onRemove }: Props) => {
               {file.users.length} users
             </p>
           </div>
-
           <ul className="pt-2">
             {file.users.map((email: string) => (
-              <li
-                key={email}
-                className="flex items-center justify-between gap-2"
-              >
+              <li key={email} className="flex items-center justify-between gap-2">
                 <p className="subtitle-2">{email}</p>
-                <Button
-                  onClick={() => onRemove(email)}
-                  className="share-remove-user"
-                >
+                <Button onClick={() => onRemove(email)} className="share-remove-user">
                   <Image
                     src="/assets/icons/remove.svg"
                     alt="Remove"

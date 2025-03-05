@@ -6,15 +6,17 @@ import { getFileTypesParams } from "../../../lib/utils";
 import { Models } from "node-appwrite"; // Ensure this import is included
 
 const Page = async ({ searchParams, params }: SearchParamProps) => { 
-  const ownerId = "someOwnerId"; // Ensure this is defined only once
+  // No need to retrieve the current user here since our getFiles function handles that.
   const type = ((await params)?.type as string) || "";
   const searchText = ((await searchParams)?.query as string) || "";
   const sort = ((await searchParams)?.sort as string) || "";
 
   const types = getFileTypesParams(type) as FileType[];
 
-  const files = await getFiles(ownerId, types, searchText, sort);
-  const totalSpace = await getTotalSpaceUsed(ownerId);
+  // Updated: Remove ownerId parameter since getFiles retrieves the current user internally.
+  const files = await getFiles(types, searchText, sort);
+  // Similarly, update getTotalSpaceUsed if it no longer expects an argument.
+  const totalSpace = await getTotalSpaceUsed();
 
   return (
     <div className="page-container">
@@ -28,7 +30,6 @@ const Page = async ({ searchParams, params }: SearchParamProps) => {
 
           <div className="sort-container">
             <p className="body-1 hidden text-light-200 sm:block">Sort by:</p>
-
             <Sort />
           </div>
         </div>

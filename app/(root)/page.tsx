@@ -6,29 +6,26 @@ import { getFileTypesParams } from "../../lib/utils"; // Adjusted path
 import { Models } from "node-appwrite"; // Ensure this import is included
 
 const Page = async ({ searchParams, params }: SearchParamProps) => { 
-  const ownerId = "someOwnerId"; // Ensure this is defined only once
   const type = ((await params)?.type as string) || "";
   const searchText = ((await searchParams)?.query as string) || "";
   const sort = ((await searchParams)?.sort as string) || "";
 
   const types = getFileTypesParams(type) as FileType[];
 
-  const files = await getFiles(ownerId, types, searchText, sort);
-  const totalSpace = await getTotalSpaceUsed(ownerId);
+  // Updated: Remove ownerId parameter.
+  const files = await getFiles(types, searchText, sort);
+  const totalSpace = await getTotalSpaceUsed();
 
   return (
     <div className="page-container">
       <section className="w-full">
         <h1 className="h1 capitalize">{type}</h1>
-
         <div className="total-size-section">
           <p className="body-1">
             Total: <span className="h5">{totalSpace} MB</span>
           </p>
-
           <div className="sort-container">
             <p className="body-1 hidden text-light-200 sm:block">Sort by:</p>
-
             <Sort />
           </div>
         </div>

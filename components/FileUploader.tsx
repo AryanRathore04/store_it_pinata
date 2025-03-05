@@ -2,13 +2,13 @@
 
 import React, { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Button } from "./ui/button"; // Corrected import path
-import { cn, convertFileToUrl, getFileType } from "../lib/utils"; // Corrected import path
+import { Button } from "./ui/button";
+import { cn, convertFileToUrl, getFileType } from "../lib/utils";
 import Image from "next/image";
-import Thumbnail from "./Thumbnail"; // Corrected import path
-import { MAX_FILE_SIZE } from "../constants"; // Corrected import path
-import { useToast } from "../hooks/use-toast"; // Corrected import path
-import { uploadFile, uploadFileToIPFS } from "../lib/actions/file.actions"; // Corrected import path
+import Thumbnail from "./Thumbnail";
+import { MAX_FILE_SIZE } from "../constants";
+import { useToast } from "../hooks/use-toast";
+import { uploadFile } from "../lib/actions/file.actions";
 import { usePathname } from "next/navigation";
 
 interface Props {
@@ -24,6 +24,7 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
+      console.log("onDrop called with files:", acceptedFiles);
       setFiles(acceptedFiles);
 
       const uploadPromises = acceptedFiles.map(async (file) => {
@@ -31,7 +32,6 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
           setFiles((prevFiles) =>
             prevFiles.filter((f) => f.name !== file.name)
           );
-
           return toast({
             description: (
               <p className="body-2 text-white">
@@ -43,30 +43,52 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
           });
         }
 
-        const ipfsCID = await uploadFileToIPFS(file); // Call the new IPFS upload function
-        const bucketFile = await uploadFile({ file, ownerId, accountId, path });
-        const ipfsLink = `https://gateway.pinata.cloud/ipfs/${ipfsCID}`; // Create the IPFS link
-        toast({
-          description: (
-            <p className="body-2 text-white">
-              <span className="font-semibold">{file.name}</span> uploaded
-              successfully. Access it{" "}
-              <a href={ipfsLink} target="_blank" rel="noopener noreferrer">
-                here
-              </a>
-              .
-            </p>
-          ),
-          className: "success-toast",
-        });
+        try {
+          console.log("File size:", file.size);
+          console.log("Starting IPFS upload for file:", file.name);
+          console.log("File details:", file);
+
+          // Call uploadFile which now handles IPFS upload and metadata storage
+          const newFile = await uploadFile(file, accountId, path);
+          console.log("Metadata stored in Appwrite. Document ID:", newFile.$id);
+
+          // Use the IPFS gateway URL from newFile
+          const ipfsLink = newFile.url;
+          toast({
+            description: (
+              <p className="body-2 text-white">
+                <span className="font-semibold">{file.name}</span> uploaded
+                successfully. Access it{" "}
+                <a href={ipfsLink} target="_blank" rel="noopener noreferrer">
+                  here
+                </a>
+                .
+              </p>
+            ),
+            className: "success-toast",
+          });
+        } catch (error) {
+          console.error("Error uploading file:", error);
+          toast({
+            description: (
+              <p className="body-2 text-white">
+                Failed to upload{" "}
+                <span className="font-semibold">{file.name}</span>. Please try
+                again.
+              </p>
+            ),
+            className: "error-toast",
+          });
+        }
       });
 
       await Promise.all(uploadPromises);
     },
-    [ownerId, accountId, path]
+    [ownerId, accountId, path, toast]
   );
 
   const { getRootProps, getInputProps } = useDropzone({ onDrop });
+  console.log("Dropzone initialized with props:", getRootProps(), getInputProps());
 
   const handleRemoveFile = (
     e: React.MouseEvent<HTMLImageElement, MouseEvent>,
@@ -91,10 +113,8 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
       {files.length > 0 && (
         <ul className="uploader-preview-list">
           <h4 className="h4 text-light-100">Uploading</h4>
-
           {files.map((file, index) => {
             const { type, extension } = getFileType(file.name);
-
             return (
               <li
                 key={`${file.name}-${index}`}
@@ -106,7 +126,6 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
                     extension={extension}
                     url={convertFileToUrl(file)}
                   />
-
                   <div className="preview-item-name">
                     {file.name}
                     <Image
@@ -117,7 +136,6 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
                     />
                   </div>
                 </div>
-
                 <Image
                   src="/assets/icons/remove.svg"
                   width={24}

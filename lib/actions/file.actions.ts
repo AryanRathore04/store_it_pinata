@@ -84,9 +84,27 @@ export const getFiles = async (types: string[], searchText: string, sort: string
 
   try {
     const queries = [
-      Query.equal("owner", currentUser.$id),
-      Query.orderDesc("$createdAt"),
+      Query.or([
+        Query.equal("owner", currentUser.$id),
+        Query.contains("users", currentUser.email)
+      ]),
+      Query.orderDesc("$createdAt")
     ];
+
+    // Optionally filter by file type
+    if (types.length > 0) {
+      queries.push(Query.equal("type", types));
+    }
+
+    // Optionally add search text filtering
+    if (searchText) {
+      queries.push(Query.search("name", searchText));
+    }
+
+    // Add sorting if provided; otherwise, default to created date ordering
+    if (sort) {
+      queries.push(Query.orderDesc(sort));
+    }
 
     const files = await databases.listDocuments(
       appwriteConfig.databaseId,
@@ -99,6 +117,8 @@ export const getFiles = async (types: string[], searchText: string, sort: string
     handleError(error, "Failed to get files");
   }
 };
+
+
 
 // Get total space used by current user (in bytes)
 export const getTotalSpaceUsed = async () => {
@@ -113,16 +133,43 @@ export const getTotalSpaceUsed = async () => {
       appwriteConfig.filesCollectionId,
       queries
     );
-    // Sum the file sizes from each document
-    const totalBytes = files.documents.reduce(
-      (total: number, doc: any) => total + (doc.size || 0),
-      0
-    );
-    return totalBytes;
+
+    // Initialize summary object with breakdown by type.
+    const summary = {
+      used: 0,
+      document: { size: 0, latestDate: null },
+      image: { size: 0, latestDate: null },
+      video: { size: 0, latestDate: null },
+      audio: { size: 0, latestDate: null },
+      other: { size: 0, latestDate: null },
+    };
+
+    files.documents.forEach((doc: any) => {
+      const size = doc.size || 0;
+      summary.used += size;
+
+      // Use the file's type (should be set when uploading)
+      const fileType = doc.type as keyof typeof summary;
+      // Check if we have a valid key for that type; otherwise, assign to 'other'
+      if (typeof summary[fileType] === 'object') {
+        summary[fileType].size += size;
+        if (!summary[fileType].latestDate || new Date(doc.$createdAt) > new Date(summary[fileType].latestDate)) {
+          summary[fileType].latestDate = doc.$createdAt;
+        }
+      } else {
+        summary.other.size += size;
+        if (!summary.other.latestDate || new Date(doc.$createdAt) > new Date(summary.other.latestDate)) {
+          summary.other.latestDate = doc.$createdAt;
+        }
+      }
+    });
+
+    return summary;
   } catch (error) {
     handleError(error, "Failed to get total space used");
   }
 };
+
 
 // Delete file from IPFS and Appwrite Database
 export const deleteFile = async (fileId: string, ipfsHash: string) => {
@@ -166,23 +213,16 @@ export const renameFile = async (fileId: string, newName: string) => {
 export const updateFileUsers = async (fileId: string, users: string[]) => {
   const { databases } = await createAdminClient();
   try {
-    // Retrieve current file document
-    const fileDocument = await databases.getDocument(
-      appwriteConfig.databaseId,
-      appwriteConfig.filesCollectionId,
-      fileId
-    );
-    // Update the users field
-    const updatedDocument = { ...fileDocument, users };
-    // Save changes to the document
+    // Update only the 'users' field without merging system attributes
     await databases.updateDocument(
       appwriteConfig.databaseId,
       appwriteConfig.filesCollectionId,
       fileId,
-      updatedDocument
+      { users }
     );
   } catch (error) {
     console.error("Failed to update file users", error);
     throw error;
   }
 };
+

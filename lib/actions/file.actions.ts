@@ -22,11 +22,7 @@ const handleError = (error: unknown, message: string) => {
 
 /**
  * Encrypt a Buffer using AES-256-GCM.
- * Returns an object with:
- * - encrypted: Buffer of encrypted data
- * - key: Buffer (32 bytes)
- * - iv: Buffer (12 bytes)
- * - authTag: Buffer (16 bytes)
+ * Returns an object with encrypted data, key, iv, and authTag.
  */
 const encryptBuffer = (buffer: Buffer) => {
   const key = crypto.randomBytes(32); // AES-256 key
@@ -37,24 +33,39 @@ const encryptBuffer = (buffer: Buffer) => {
   return { encrypted, key, iv, authTag };
 };
 
-// Upload file to IPFS and store metadata in Appwrite (with encryption)
-export const uploadFile = async (file: File, accountId: string, path: string) => {
+/**
+ * Upload file to IPFS and store metadata in Appwrite.
+ * @param file The file to upload.
+ * @param accountId The account ID of the user.
+ * @param path The path to revalidate.
+ * @param thumbnailUrl (Optional) A URL for the file thumbnail.
+ */
+
+
+
+
+
+export const uploadFile = async (
+  file: File,
+  accountId: string,
+  path: string,
+  thumbnailUrl?: string  // New optional parameter for thumbnail URL
+) => {
   const { databases } = await createAdminClient();
   const currentUser = await getCurrentUser();
   if (!currentUser) throw new Error("User not found");
 
   try {
-    // Read file into a Buffer
+    // Read file into Buffer
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Encrypt the file buffer using AES-256-GCM
+    // Encrypt the file using AES-256-GCM
     const { encrypted, key, iv, authTag } = encryptBuffer(buffer);
 
     // Create a Blob from the encrypted data
     const encryptedBlob = new Blob([encrypted], { type: file.type });
     const formData = new FormData();
-    // Append the encrypted file with a .enc extension
     formData.append("file", encryptedBlob, `${file.name}.enc`);
 
     const pinataMetadata = JSON.stringify({
@@ -97,12 +108,12 @@ export const uploadFile = async (file: File, accountId: string, path: string) =>
     // Extract file type and extension
     const { type: fileType, extension } = getFileType(file.name);
 
-    // Convert encryption details to Base64 strings for storage
+    // Convert encryption details to Base64
     const keyB64 = key.toString("base64");
     const ivB64 = iv.toString("base64");
     const tagB64 = authTag.toString("base64");
 
-    // Store file metadata in Appwrite Database; bucketFileId stores the IPFS hash.
+    // Store metadata (including thumbnailUrl if provided)
     const fileDocument = {
       type: fileType, // Required attribute
       extension,
@@ -112,11 +123,12 @@ export const uploadFile = async (file: File, accountId: string, path: string) =>
       owner: currentUser.$id,
       accountId,
       users: [],
-      bucketFileId: ipfsHash, // Using the IPFS hash as bucketFileId
+      bucketFileId: ipfsHash,
       encryptionKey: keyB64,
       iv: ivB64,
       authTag: tagB64,
       encrypted: true,
+      thumbnailUrl: thumbnailUrl || "",  // New field
     };
 
     const newFile = await databases.createDocument(
@@ -133,11 +145,15 @@ export const uploadFile = async (file: File, accountId: string, path: string) =>
   }
 };
 
+
 // Fetch all files stored on IPFS
 export const getFiles = async (types: string[], searchText: string, sort: string) => {
   const { databases } = await createAdminClient();
   const currentUser = await getCurrentUser();
-  if (!currentUser) throw new Error("User not found");
+  if (!currentUser) {
+    console.error("User not found. Ensure the user is authenticated.");
+    throw new Error("User not found");
+  }
 
   try {
     const queries = [
@@ -171,6 +187,7 @@ export const getFiles = async (types: string[], searchText: string, sort: string
 
     return parseStringify(files);
   } catch (error) {
+    console.error("Error fetching files:", error);
     handleError(error, "Failed to get files");
   }
 };
@@ -189,7 +206,6 @@ export const getTotalSpaceUsed = async () => {
       queries
     );
 
-    // Initialize summary object with breakdown by type.
     const summary = {
       used: 0,
       document: { size: 0, latestDate: null },
@@ -204,7 +220,7 @@ export const getTotalSpaceUsed = async () => {
       summary.used += size;
 
       const fileType = doc.type as keyof typeof summary;
-      if (typeof summary[fileType] === 'object') {
+      if (typeof summary[fileType] === "object") {
         summary[fileType].size += size;
         if (!summary[fileType].latestDate || new Date(doc.$createdAt) > new Date(summary[fileType].latestDate)) {
           summary[fileType].latestDate = doc.$createdAt;
@@ -243,8 +259,6 @@ export const deleteFile = async (fileId: string, ipfsHash: string) => {
 
     if (response.status === 200) {
       console.log("File successfully removed from Pinata");
-
-      // Remove the file record from Appwrite Database
       await databases.deleteDocument(
         appwriteConfig.databaseId,
         appwriteConfig.filesCollectionId,
@@ -283,7 +297,6 @@ export const renameFile = async (fileId: string, newName: string) => {
 export const updateFileUsers = async (fileId: string, users: string[]) => {
   const { databases } = await createAdminClient();
   try {
-    // Update only the 'users' field without merging system attributes
     await databases.updateDocument(
       appwriteConfig.databaseId,
       appwriteConfig.filesCollectionId,

@@ -17,6 +17,9 @@ interface Props {
   className?: string;
 }
 
+
+
+
 const FileUploader = ({ ownerId, accountId, className }: Props) => {
   const path = usePathname();
   const { toast } = useToast();

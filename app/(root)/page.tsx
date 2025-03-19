@@ -12,8 +12,8 @@ import { convertFileSize, getUsageSummary } from "@/lib/utils";
 
 const Dashboard = async () => {
   // Parallel requests
-  const [files, totalSpace] = await Promise.all([
-    getFiles({ types: [], limit: 10 }),
+  const [files, totalSpace, ] = await Promise.all([
+    getFiles({ types: [], limit: 10,  }),
     getTotalSpaceUsed(),
   ]);
 

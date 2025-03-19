@@ -6,18 +6,17 @@ import FormattedDateTime from "@/components/FormattedDateTime";
 import ActionDropdown from "@/components/ActionDropdown";
 
 const Card = ({ file }: { file: Models.Document }) => {
-  // Use the IPFS URL stored in the file document.
+  // Preserve the fileUrl for generating thumbnails (if needed)
   const fileUrl = file.url || "";
   
-  // Determine the owner's display name:
-  // If file.owner is an object and has a fullName property, use it; otherwise, use the raw value.
+  // Determine the owner's display name
   const ownerName =
     file.owner && typeof file.owner === "object" && "fullName" in file.owner
       ? (file.owner as { fullName: string }).fullName
       : file.owner;
 
   return (
-    <Link href={fileUrl} target="_blank" className="file-card">
+    <Link href={`/files/${file.$id}`} className="file-card">
       <div className="flex justify-between">
         <Thumbnail
           type={file.type}

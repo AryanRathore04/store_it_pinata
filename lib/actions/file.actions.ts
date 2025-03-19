@@ -7,6 +7,7 @@ import { ID, Models, Query } from "node-appwrite";
 import { parseStringify, getFileType } from "../utils";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "../actions/user.actions";
+import crypto from "crypto";
 
 const PINATA_API_KEY = process.env.PINATA_API_KEY;
 const PINATA_SECRET_API_KEY = process.env.PINATA_SECRET_API_KEY;
@@ -19,16 +20,65 @@ const handleError = (error: unknown, message: string) => {
   throw error;
 };
 
-// Upload file to IPFS and store metadata in Appwrite
+/**
+ * Encrypt a Buffer using AES-256-GCM.
+ * Returns an object with:
+ * - encrypted: Buffer of encrypted data
+ * - key: Buffer (32 bytes)
+ * - iv: Buffer (12 bytes)
+ * - authTag: Buffer (16 bytes)
+ */
+const encryptBuffer = (buffer: Buffer) => {
+  const key = crypto.randomBytes(32); // AES-256 key
+  const iv = crypto.randomBytes(12);  // 12-byte IV for GCM
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return { encrypted, key, iv, authTag };
+};
+
+// Upload file to IPFS and store metadata in Appwrite (with encryption)
 export const uploadFile = async (file: File, accountId: string, path: string) => {
   const { databases } = await createAdminClient();
   const currentUser = await getCurrentUser();
   if (!currentUser) throw new Error("User not found");
 
   try {
-    // Upload file to IPFS (Pinata)
+    // Read file into a Buffer
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Encrypt the file buffer using AES-256-GCM
+    const { encrypted, key, iv, authTag } = encryptBuffer(buffer);
+
+    // Create a Blob from the encrypted data
+    const encryptedBlob = new Blob([encrypted], { type: file.type });
     const formData = new FormData();
-    formData.append("file", file);
+    // Append the encrypted file with a .enc extension
+    formData.append("file", encryptedBlob, `${file.name}.enc`);
+
+    const pinataMetadata = JSON.stringify({
+      name: file.name,
+      keyvalues: {
+        owner: currentUser.$id,
+        accountId: accountId,
+      },
+    });
+
+    const pinataOptions = JSON.stringify({
+      cidVersion: 1,
+      customPinPolicy: {
+        regions: [
+          {
+            id: "FRA1", // Example region – adjust as needed.
+            desiredReplicationCount: 1,
+          },
+        ],
+      },
+    });
+
+    formData.append("pinataMetadata", pinataMetadata);
+    formData.append("pinataOptions", pinataOptions);
 
     const response = await axios.post(PINATA_BASE_URL, formData, {
       headers: {
@@ -45,11 +95,16 @@ export const uploadFile = async (file: File, accountId: string, path: string) =>
     const fileUrl = `https://gateway.pinata.cloud/ipfs/${ipfsHash}`;
 
     // Extract file type and extension
-    const { type, extension } = getFileType(file.name);
+    const { type: fileType, extension } = getFileType(file.name);
 
-    // Store file metadata in Appwrite Database; note bucketFileId stores the IPFS hash.
+    // Convert encryption details to Base64 strings for storage
+    const keyB64 = key.toString("base64");
+    const ivB64 = iv.toString("base64");
+    const tagB64 = authTag.toString("base64");
+
+    // Store file metadata in Appwrite Database; bucketFileId stores the IPFS hash.
     const fileDocument = {
-      type, // Required attribute
+      type: fileType, // Required attribute
       extension,
       name: file.name,
       url: fileUrl,
@@ -57,7 +112,11 @@ export const uploadFile = async (file: File, accountId: string, path: string) =>
       owner: currentUser.$id,
       accountId,
       users: [],
-      bucketFileId: ipfsHash, // Using ipfsHash as the bucketFileId
+      bucketFileId: ipfsHash, // Using the IPFS hash as bucketFileId
+      encryptionKey: keyB64,
+      iv: ivB64,
+      authTag: tagB64,
+      encrypted: true,
     };
 
     const newFile = await databases.createDocument(
@@ -73,8 +132,6 @@ export const uploadFile = async (file: File, accountId: string, path: string) =>
     handleError(error, "Failed to upload file");
   }
 };
-
-
 
 // Fetch all files stored on IPFS
 export const getFiles = async (types: string[], searchText: string, sort: string) => {
@@ -118,8 +175,6 @@ export const getFiles = async (types: string[], searchText: string, sort: string
   }
 };
 
-
-
 // Get total space used by current user (in bytes)
 export const getTotalSpaceUsed = async () => {
   const { databases } = await createAdminClient();
@@ -148,9 +203,7 @@ export const getTotalSpaceUsed = async () => {
       const size = doc.size || 0;
       summary.used += size;
 
-      // Use the file's type (should be set when uploading)
       const fileType = doc.type as keyof typeof summary;
-      // Check if we have a valid key for that type; otherwise, assign to 'other'
       if (typeof summary[fileType] === 'object') {
         summary[fileType].size += size;
         if (!summary[fileType].latestDate || new Date(doc.$createdAt) > new Date(summary[fileType].latestDate)) {
@@ -170,25 +223,43 @@ export const getTotalSpaceUsed = async () => {
   }
 };
 
-
 // Delete file from IPFS and Appwrite Database
 export const deleteFile = async (fileId: string, ipfsHash: string) => {
   const { databases } = await createAdminClient();
 
   try {
-    // Remove file from Pinata IPFS
-    await axios.delete(`${PINATA_UNPIN_URL}${ipfsHash}`, {
-      headers: { Authorization: `Bearer ${PINATA_JWT}` },
+    console.log("Deleting file with IPFS Hash:", ipfsHash);
+    console.log("JWT Token:", PINATA_JWT);
+
+    if (!ipfsHash) {
+      throw new Error("IPFS hash is undefined");
+    }
+
+    const response = await axios.delete(`${PINATA_UNPIN_URL}${ipfsHash}`, {
+      headers: {
+        Authorization: `Bearer ${PINATA_JWT}`,
+      },
     });
 
-    // Remove file record from Appwrite Database
-    await databases.deleteDocument(
-      appwriteConfig.databaseId,
-      appwriteConfig.filesCollectionId,
-      fileId
-    );
+    if (response.status === 200) {
+      console.log("File successfully removed from Pinata");
+
+      // Remove the file record from Appwrite Database
+      await databases.deleteDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.filesCollectionId,
+        fileId
+      );
+    } else {
+      console.error("Failed to unpin file from IPFS", response.data);
+    }
   } catch (error) {
-    handleError(error, "Failed to delete file");
+    if (axios.isAxiosError(error)) {
+      console.error("Pinata Unpin API Error:", error.response?.data || error.message);
+    } else {
+      console.error("Unexpected Error:", error);
+    }
+    throw error;
   }
 };
 
@@ -208,7 +279,6 @@ export const renameFile = async (fileId: string, newName: string) => {
   }
 };
 
-
 // Update file users in Appwrite Database
 export const updateFileUsers = async (fileId: string, users: string[]) => {
   const { databases } = await createAdminClient();
@@ -225,4 +295,3 @@ export const updateFileUsers = async (fileId: string, users: string[]) => {
     throw error;
   }
 };
-

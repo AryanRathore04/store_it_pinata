@@ -47,7 +47,7 @@ const Page = ({ searchParams, params }: SearchParamProps) => {
         <div className="total-size-section">
           <p className="body-1">
             Total:{" "}
-            <span className="h5">{convertFileSize(totalSpace.used)} MB</span>
+            <span className="h5">{convertFileSize(totalSpace.used)}</span>
           </p>
 
           <div className="sort-container">

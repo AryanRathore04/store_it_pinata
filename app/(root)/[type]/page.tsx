@@ -30,7 +30,7 @@ const Page = ({ searchParams, params }: SearchParamProps) => {
         const fetchedTotalSpace = await getTotalSpaceUsed();
 
         setFiles(fetchedFiles.documents);
-        setTotalSpace(fetchedTotalSpace);
+        setTotalSpace(fetchedTotalSpace || { used: 0 });
       } catch (error) {
         console.error("Error fetching data:", error);
       }

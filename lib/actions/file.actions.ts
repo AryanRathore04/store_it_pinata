@@ -26,7 +26,7 @@ const handleError = (error: unknown, message: string) => {
  */
 const encryptBuffer = (buffer: Buffer) => {
   const key = crypto.randomBytes(32); // AES-256 key
-  const iv = crypto.randomBytes(12);  // 12-byte IV for GCM
+  const iv = crypto.randomBytes(12); // 12-byte IV for GCM
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
   const authTag = cipher.getAuthTag();
@@ -40,16 +40,11 @@ const encryptBuffer = (buffer: Buffer) => {
  * @param path The path to revalidate.
  * @param thumbnailUrl (Optional) A URL for the file thumbnail.
  */
-
-
-
-
-
 export const uploadFile = async (
   file: File,
   accountId: string,
   path: string,
-  thumbnailUrl?: string  // New optional parameter for thumbnail URL
+  thumbnailUrl?: string // New optional parameter for thumbnail URL
 ) => {
   const { databases } = await createAdminClient();
   const currentUser = await getCurrentUser();
@@ -128,7 +123,7 @@ export const uploadFile = async (
       iv: ivB64,
       authTag: tagB64,
       encrypted: true,
-      thumbnailUrl: thumbnailUrl || "",  // New field
+      thumbnailUrl: thumbnailUrl || "", // New field
     };
 
     const newFile = await databases.createDocument(
@@ -145,47 +140,51 @@ export const uploadFile = async (
   }
 };
 
-
 // Fetch all files stored on IPFS
-export const getFiles = async (types: string[], searchText: string, sort: string) => {
+export const getFiles = async (
+  types: string[],
+  searchText: string,
+  sort: string
+) => {
   const { databases } = await createAdminClient();
   const currentUser = await getCurrentUser();
   if (!currentUser) {
     console.error("User not found. Ensure the user is authenticated.");
     throw new Error("User not found");
   }
-
   try {
     const queries = [
       Query.or([
         Query.equal("owner", currentUser.$id),
-        Query.contains("users", currentUser.email)
+        Query.contains("users", currentUser.email),
       ]),
-      Query.orderDesc("$createdAt")
+      Query.orderDesc("$createdAt"),
     ];
-
     // Optionally filter by file type
     if (types.length > 0) {
       queries.push(Query.equal("type", types));
     }
-
     // Optionally add search text filtering
     if (searchText) {
       queries.push(Query.search("name", searchText));
     }
-
     // Add sorting if provided; otherwise, default to created date ordering
     if (sort) {
       queries.push(Query.orderDesc(sort));
     }
-
     const files = await databases.listDocuments(
       appwriteConfig.databaseId,
       appwriteConfig.filesCollectionId,
       queries
     );
 
-    return parseStringify(files);
+    // Ensure ipfsHash (bucketFileId) is included in the returned file objects
+    const enrichedFiles = files.documents.map((file) => ({
+      ...file,
+      ipfsHash: file.bucketFileId, // Map bucketFileId to ipfsHash
+    }));
+
+    return parseStringify({ ...files, documents: enrichedFiles });
   } catch (error) {
     console.error("Error fetching files:", error);
     handleError(error, "Failed to get files");
@@ -222,12 +221,18 @@ export const getTotalSpaceUsed = async () => {
       const fileType = doc.type as keyof typeof summary;
       if (typeof summary[fileType] === "object") {
         summary[fileType].size += size;
-        if (!summary[fileType].latestDate || new Date(doc.$createdAt) > new Date(summary[fileType].latestDate)) {
+        if (
+          !summary[fileType].latestDate ||
+          new Date(doc.$createdAt) > new Date(summary[fileType].latestDate)
+        ) {
           summary[fileType].latestDate = doc.$createdAt;
         }
       } else {
         summary.other.size += size;
-        if (!summary.other.latestDate || new Date(doc.$createdAt) > new Date(summary.other.latestDate)) {
+        if (
+          !summary.other.latestDate ||
+          new Date(doc.$createdAt) > new Date(summary.other.latestDate)
+        ) {
           summary.other.latestDate = doc.$createdAt;
         }
       }
@@ -240,12 +245,17 @@ export const getTotalSpaceUsed = async () => {
 };
 
 // Delete file from IPFS and Appwrite Database
-export const deleteFile = async (fileId: string, ipfsHash: string) => {
+export const deleteFile = async (
+  fileId: string,
+  ipfsHash: string,
+  path: string
+) => {
   const { databases } = await createAdminClient();
 
   try {
     console.log("Deleting file with IPFS Hash:", ipfsHash);
     console.log("JWT Token:", PINATA_JWT);
+    console.log("Path provided:", path); // Debugging log
 
     if (!ipfsHash) {
       throw new Error("IPFS hash is undefined");
@@ -264,12 +274,23 @@ export const deleteFile = async (fileId: string, ipfsHash: string) => {
         appwriteConfig.filesCollectionId,
         fileId
       );
+
+      // Validate the path before revalidating
+      if (typeof path === "string" && path.length > 0) {
+        console.log("Revalidating path:", path);
+        revalidatePath(path);
+      } else {
+        console.error("Invalid path provided for revalidation:", path);
+      }
     } else {
       console.error("Failed to unpin file from IPFS", response.data);
     }
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      console.error("Pinata Unpin API Error:", error.response?.data || error.message);
+      console.error(
+        "Pinata Unpin API Error:",
+        error.response?.data || error.message
+      );
     } else {
       console.error("Unexpected Error:", error);
     }

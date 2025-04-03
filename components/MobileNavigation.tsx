@@ -32,6 +32,8 @@ const MobileNavigation = ({
   avatar,
   email,
 }: Props) => {
+  console.log("MobileNavigation rendered");
+
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -79,7 +81,7 @@ const MobileNavigation = ({
                   <li
                     className={cn(
                       "mobile-nav-item",
-                      pathname === url && "shad-active",
+                      pathname === url && "shad-active"
                     )}
                   >
                     <Image
@@ -89,7 +91,7 @@ const MobileNavigation = ({
                       height={24}
                       className={cn(
                         "nav-icon",
-                        pathname === url && "nav-icon-active",
+                        pathname === url && "nav-icon-active"
                       )}
                     />
                     <p>{name}</p>

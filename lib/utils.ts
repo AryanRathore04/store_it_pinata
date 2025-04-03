@@ -112,7 +112,7 @@ export const formatDateTime = (isoString: string | null | undefined) => {
 
 export const getFileIcon = (
   extension: string | undefined,
-  type: FileType | string,
+  type: FileType | string
 ) => {
   switch (extension) {
     // Document
@@ -174,8 +174,48 @@ export const getFileIcon = (
 
 // APPWRITE URL UTILS
 // Construct appwrite file URL - https://appwrite.io/docs/apis/rest#images
-export const constructFileUrl = (bucketFileId: string) => {
-  return `${process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT}/storage/buckets/${process.env.NEXT_PUBLIC_APPWRITE_BUCKET}/files/${bucketFileId}/view?project=${process.env.NEXT_PUBLIC_APPWRITE_PROJECT}`;
+let lastLoggedError = "";
+
+export const constructFileUrl = (bucketFileId: string, fileType: string) => {
+  const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
+  const bucket = process.env.NEXT_PUBLIC_APPWRITE_BUCKET;
+  const project = process.env.NEXT_PUBLIC_APPWRITE_PROJECT;
+
+  if (!endpoint || !bucket || !project) {
+    const errorMessage = "Missing Appwrite environment variables.";
+    if (lastLoggedError !== errorMessage) {
+      console.error(errorMessage, { endpoint, bucket, project });
+      lastLoggedError = errorMessage;
+    }
+    return "#"; // Return a fallback URL or handle appropriately
+  }
+
+  if (!bucketFileId) {
+    const errorMessage = "Missing bucketFileId.";
+    if (lastLoggedError !== errorMessage) {
+      console.error(errorMessage, bucketFileId);
+      lastLoggedError = errorMessage;
+    }
+    return "#"; // Return a fallback URL or handle appropriately
+  }
+
+  if (!fileType) {
+    const errorMessage = "Missing fileType.";
+    if (lastLoggedError !== errorMessage) {
+      console.error(errorMessage, fileType);
+      lastLoggedError = errorMessage;
+    }
+    return "#"; // Return a fallback URL or handle appropriately
+  }
+
+  const url =
+    fileType === "image"
+      ? `${endpoint}/storage/buckets/${bucket}/files/${bucketFileId}/view?project=${project}`
+      : `${endpoint}/storage/buckets/${bucket}/files/${bucketFileId}/download?project=${project}`;
+
+  console.log("Constructed URL:", { url, bucketFileId, fileType });
+
+  return url;
 };
 
 export const constructDownloadUrl = (bucketFileId: string) => {

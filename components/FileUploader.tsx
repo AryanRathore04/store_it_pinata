@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { memo, useCallback, useState, useMemo } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "./ui/button";
-import { cn, convertFileToUrl, getFileType } from "../lib/utils";
+import { cn, constructFileUrl, getFileType } from "../lib/utils";
 import Image from "next/image";
 import Thumbnail from "./Thumbnail";
 import { MAX_FILE_SIZE } from "../constants";
@@ -17,10 +17,9 @@ interface Props {
   className?: string;
 }
 
+const FileUploader = memo(({ ownerId, accountId, className }: Props) => {
+  console.log("FileUploader rendered");
 
-
-
-const FileUploader = ({ ownerId, accountId, className }: Props) => {
   const path = usePathname();
   const { toast } = useToast();
   const [files, setFiles] = useState<File[]>([]);
@@ -91,7 +90,11 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
   );
 
   const { getRootProps, getInputProps } = useDropzone({ onDrop });
-  console.log("Dropzone initialized with props:", getRootProps(), getInputProps());
+  console.log(
+    "Dropzone initialized with props:",
+    getRootProps(),
+    getInputProps()
+  );
 
   const handleRemoveFile = (
     e: React.MouseEvent<HTMLImageElement, MouseEvent>,
@@ -118,17 +121,26 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
           <h4 className="h4 text-light-100">Uploading</h4>
           {files.map((file, index) => {
             const { type, extension } = getFileType(file.name);
+            const fileUrl =
+              file.name && type ? constructFileUrl(file.name, type) : "#";
+
+            if (fileUrl === "#") {
+              console.error(
+                "Invalid file data for constructing URL in FileUploader:",
+                {
+                  fileName: file.name,
+                  fileType: type,
+                }
+              );
+            }
+
             return (
               <li
                 key={`${file.name}-${index}`}
                 className="uploader-preview-item"
               >
                 <div className="flex items-center gap-3">
-                  <Thumbnail
-                    type={type}
-                    extension={extension}
-                    url={convertFileToUrl(file)}
-                  />
+                  <Thumbnail type={type} extension={extension} url={fileUrl} />
                   <div className="preview-item-name">
                     {file.name}
                     <Image
@@ -153,6 +165,6 @@ const FileUploader = ({ ownerId, accountId, className }: Props) => {
       )}
     </div>
   );
-};
+});
 
 export default FileUploader;

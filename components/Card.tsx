@@ -1,15 +1,21 @@
 import { Models } from "node-appwrite";
 import Link from "next/link";
 import Thumbnail from "@/components/Thumbnail";
-import { convertFileSize } from "@/lib/utils";
+import { convertFileSize, constructFileUrl } from "@/lib/utils";
 import FormattedDateTime from "@/components/FormattedDateTime";
 import ActionDropdown from "@/components/ActionDropdown";
 
 const Card = ({ file }: { file: Models.Document }) => {
-  // Preserve the fileUrl for generating thumbnails (if needed)
-  const fileUrl = file.url || "";
-  
-  // Determine the owner's display name
+  const fileUrl =
+    file.$id && file.type ? constructFileUrl(file.$id, file.type) : "#";
+
+  if (fileUrl === "#") {
+    console.error("Invalid file data for constructing URL in Card:", {
+      fileId: file.$id,
+      fileType: file.type,
+    });
+  }
+
   const ownerName =
     file.owner && typeof file.owner === "object" && "fullName" in file.owner
       ? (file.owner as { fullName: string }).fullName
@@ -26,7 +32,6 @@ const Card = ({ file }: { file: Models.Document }) => {
           imageClassName="!size-11"
         />
         <div className="flex flex-col items-end justify-between">
-          {/* Wrap ActionDropdown in a div that stops click propagation */}
           <div onClick={(e) => e.stopPropagation()}>
             <ActionDropdown file={file} />
           </div>
@@ -39,9 +44,7 @@ const Card = ({ file }: { file: Models.Document }) => {
           date={file.$createdAt}
           className="body-2 text-light-100"
         />
-        <p className="caption line-clamp-1 text-light-200">
-          By: {ownerName}
-        </p>
+        <p className="caption line-clamp-1 text-light-200">By: {ownerName}</p>
       </div>
     </Link>
   );
